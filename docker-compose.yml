@@ -1,0 +1,60 @@
+services:
+  pocketbase:
+    build:
+      context: .
+      dockerfile: Dockerfile.pocketbase
+    container_name: osing-pocketbase
+    restart: unless-stopped
+    ports:
+      - "8090:8090"
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./pocketbase/pb_data:/pb/pb_data
+      - ./pocketbase/pb_migrations:/pb/pb_migrations:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8090/api/health || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 2s
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: osing-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      - POCKETBASE_URL=http://pocketbase:8090
+      - NEXTAUTH_URL=http://localhost:3000
+    depends_on:
+      pocketbase:
+        condition: service_healthy
+    command: ["npx", "next", "start", "-H", "0.0.0.0", "-p", "3000"]
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: osing-worker
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - NODE_ENV=production
+      - POCKETBASE_URL=http://pocketbase:8090
+    depends_on:
+      pocketbase:
+        condition: service_healthy
+    command: ["node", "--conditions=react-server", "--import", "tsx", "worker/main.ts"]
