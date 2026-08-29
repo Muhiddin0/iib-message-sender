@@ -6,7 +6,7 @@ services:
     container_name: osing-pocketbase
     restart: unless-stopped
     ports:
-      - "8090:8090"
+      - "${POCKETBASE_PORT:-8090}:8090"
     env_file:
       - path: .env
         required: false
@@ -27,7 +27,7 @@ services:
     container_name: osing-web
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${PORT:-3000}:3000"
     env_file:
       - path: .env
         required: false
@@ -36,7 +36,7 @@ services:
       - PORT=3000
       - HOSTNAME=0.0.0.0
       - POCKETBASE_URL=http://pocketbase:8090
-      - NEXTAUTH_URL=http://localhost:3000
+      - NEXTAUTH_URL=${NEXTAUTH_URL:-http://localhost:3000}
     depends_on:
       pocketbase:
         condition: service_healthy
