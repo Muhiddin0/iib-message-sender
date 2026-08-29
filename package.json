@@ -3,24 +3,48 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node --env-file-if-exists=.env --env-file-if-exists=.env.local scripts/dev.mjs",
+    "dev:web": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "worker": "node --env-file-if-exists=.env --env-file-if-exists=.env.local --conditions=react-server --import tsx worker/main.ts",
+    "pocketbase:migrate": "pocketbase migrate up --dir pocketbase/pb_data --migrationsDir pocketbase/pb_migrations --hooksDir pocketbase/pb_hooks --publicDir pocketbase/pb_public",
+    "pocketbase:serve": "pocketbase serve --dir pocketbase/pb_data --migrationsDir pocketbase/pb_migrations --hooksDir pocketbase/pb_hooks --publicDir pocketbase/pb_public --http=127.0.0.1:8090"
   },
   "dependencies": {
+    "@cloudflare/kumo": "^2.12.0",
+    "@mtcute/node": "0.31.0",
+    "@phosphor-icons/react": "2.1.10",
+    "exceljs": "^4.4.0",
     "next": "16.3.2",
+    "next-auth": "4.24.15",
+    "pocketbase": "0.28.0",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "server-only": "0.0.1",
+    "tsx": "4.20.6",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.2",
+    "jsdom": "28.0.0",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "4.1.11"
+  },
+  "overrides": {
+    "exceljs": {
+      "uuid": "11.1.1"
+    }
   }
 }

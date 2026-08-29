@@ -1,69 +1,84 @@
-import Image from "next/image";
+import { Badge, LayerCard, LinkButton } from "@cloudflare/kumo";
+import { ArrowRightIcon, CheckCircleIcon, PaperPlaneTiltIcon, ShieldCheckIcon } from "@phosphor-icons/react/ssr";
+import { getServerSession } from "next-auth";
+import { redirect } from "next/navigation";
 
-export default function Home() {
+import { authOptions } from "@/lib/auth/options";
+
+export default async function HomePage() {
+  const session = await getServerSession(authOptions);
+  if (session?.user?.id) redirect("/dashboard");
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+    <main className="relative flex min-h-screen overflow-hidden px-5 py-6 sm:px-8 lg:px-12">
+      <div aria-hidden className="app-grid pointer-events-none absolute inset-0 opacity-70" />
+      <div className="relative mx-auto flex w-full max-w-6xl flex-col">
+        <header className="flex items-center justify-between py-2">
+          <div className="flex items-center gap-2.5">
+            <span className="flex size-9 items-center justify-center rounded-xl bg-kumo-brand text-white shadow-sm">
+              <PaperPlaneTiltIcon aria-hidden size={19} weight="fill" />
+            </span>
+            <span className="text-lg font-semibold tracking-tight">Osing</span>
+          </div>
+          <LinkButton href="/auth/sign-in" variant="secondary" size="sm">Kirish</LinkButton>
+        </header>
+
+        <section className="grid flex-1 items-center gap-14 py-20 lg:grid-cols-[1.05fr_.95fr] lg:py-28">
+          <div className="max-w-2xl">
+            <Badge variant="primary" appearance="filled" icon={<CheckCircleIcon size={14} weight="fill" />}>
+              Telegram MTProto bilan ishlaydi
+            </Badge>
+            <h1 className="mt-6 max-w-xl text-5xl font-semibold leading-[1.06] tracking-[-0.045em] sm:text-6xl">
+              Bitta xabar. Barcha muhim chatlaringiz.
+            </h1>
+            <p className="mt-6 max-w-xl text-lg leading-8 text-kumo-subtle">
+              Shaxsiy Telegram akkauntingizni ulang, guruh va kanallarni tanlang, yuborish jarayonini real vaqtda kuzating.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <LinkButton href="/auth/sign-in" variant="primary" size="lg" icon={<ArrowRightIcon size={18} />}>
+                Boshlash
+              </LinkButton>
+            </div>
+            <div className="mt-8 flex items-center gap-2 text-sm text-kumo-subtle">
+              <ShieldCheckIcon aria-hidden size={18} />
+              Telegram sessiyasi AES-256-GCM bilan shifrlanadi.
+            </div>
+          </div>
+
+          <LayerCard className="overflow-hidden rounded-3xl p-0 shadow-xl shadow-black/5">
+            <div className="border-b border-kumo-hairline bg-kumo-elevated px-5 py-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-semibold">Bahorgi yangiliklar</p>
+                  <p className="mt-0.5 text-sm text-kumo-subtle">24 ta chat</p>
+                </div>
+                <Badge variant="primary">Yuborilmoqda</Badge>
+              </div>
+            </div>
+            <div className="space-y-2 bg-kumo-base p-4">
+              {[
+                ["Dizayn jamoasi", "Yuborildi", "success"],
+                ["Marketing kanali", "Yuborildi", "success"],
+                ["Mahsulot guruhi", "Yuborilmoqda", "info"],
+                ["Hamkorlar", "Navbatda", "muted"],
+              ].map(([name, status, tone]) => (
+                <div key={name} className="flex items-center gap-3 rounded-xl border border-kumo-hairline px-3 py-3">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-kumo-recessed text-sm font-semibold">
+                    {name.slice(0, 1)}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{name}</p>
+                    <p className="text-xs text-kumo-subtle">Xabar qabul qilindi</p>
+                  </div>
+                  <span className={tone === "success" ? "text-xs text-kumo-success" : tone === "info" ? "text-xs text-kumo-info" : "text-xs text-kumo-subtle"}>
+                    {status}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </LayerCard>
+        </section>
+      </div>
+    </main>
   );
 }

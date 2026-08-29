@@ -32,6 +32,11 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# PocketBase runtime data (contains records, auth keys and uploaded files)
+/pocketbase/pb_data/
+/pocketbase/pb_public/
 
 # vercel
 .vercel
