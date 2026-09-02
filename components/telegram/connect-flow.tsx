@@ -5,7 +5,19 @@ import { ArrowLeftIcon, CheckCircleIcon, PaperPlaneTiltIcon, PencilSimpleIcon } 
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
+import {
+  isValidTelegramPhone,
+  normalizeTelegramPhone,
+  TELEGRAM_PHONE_ERROR_MESSAGE,
+} from "@/lib/telegram/phone";
+
 type State = "idle" | "code_required" | "password_required" | "connected";
+
+class ApiError extends Error {
+  constructor(message: string, readonly code?: string) {
+    super(message);
+  }
+}
 
 async function post(path: string, data: Record<string, string>) {
   const response = await fetch(path, {
@@ -14,7 +26,7 @@ async function post(path: string, data: Record<string, string>) {
     body: JSON.stringify(data),
   });
   const body = await response.json();
-  if (!response.ok) throw new Error(body.error?.message ?? "Amal bajarilmadi.");
+  if (!response.ok) throw new ApiError(body.error?.message ?? "Amal bajarilmadi.", body.error?.code);
   return body as { state: State };
 }
 
@@ -26,15 +38,24 @@ export function ConnectFlow({ initialState }: { initialState: State }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState<"submit" | "edit" | null>(null);
   const [error, setError] = useState("");
+  const [phoneError, setPhoneError] = useState("");
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    const normalizedPhone = normalizeTelegramPhone(phone);
+    if (state === "idle" && !isValidTelegramPhone(normalizedPhone)) {
+      setPhoneError(TELEGRAM_PHONE_ERROR_MESSAGE);
+      setError("");
+      return;
+    }
+
     setBusy("submit");
     setError("");
+    setPhoneError("");
     try {
       const result =
         state === "idle"
-          ? await post("/api/telegram/send-code", { phone })
+          ? await post("/api/telegram/send-code", { phone: normalizedPhone })
           : state === "code_required"
             ? await post("/api/telegram/verify-code", { code })
             : await post("/api/telegram/verify-password", { password });
@@ -44,7 +65,12 @@ export function ConnectFlow({ initialState }: { initialState: State }) {
         router.refresh();
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Amal bajarilmadi.");
+      const message = caught instanceof Error ? caught.message : "Amal bajarilmadi.";
+      if (state === "idle" && caught instanceof ApiError && caught.code === "VALIDATION_ERROR") {
+        setPhoneError(message);
+      } else {
+        setError(message);
+      }
     } finally {
       setBusy(null);
     }
@@ -57,6 +83,7 @@ export function ConnectFlow({ initialState }: { initialState: State }) {
       await post("/api/telegram/cancel-authorization", {});
       setCode("");
       setPassword("");
+      setPhoneError("");
       setState("idle");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Amal bajarilmadi.");
@@ -95,10 +122,16 @@ export function ConnectFlow({ initialState }: { initialState: State }) {
             label="Telefon raqami"
             description="Telegram raqamingizni xalqaro formatda kiriting."
             placeholder="+998 90 123 45 67"
+            type="tel"
+            inputMode="tel"
             autoComplete="tel"
             value={phone}
-            onChange={(event) => setPhone(event.target.value.replace(/\s/g, ""))}
-            required
+            onChange={(event) => {
+              setPhone(normalizeTelegramPhone(event.target.value));
+              if (phoneError) setPhoneError("");
+            }}
+            error={phoneError || undefined}
+            maxLength={20}
             autoFocus
           />
         ) : null}

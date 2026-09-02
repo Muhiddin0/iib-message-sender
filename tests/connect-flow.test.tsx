@@ -8,6 +8,7 @@ const navigation = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => navigation }));
 
 import { ConnectFlow } from "@/components/telegram/connect-flow";
+import { TELEGRAM_PHONE_ERROR_MESSAGE } from "@/lib/telegram/phone";
 
 describe("Telegram phone authorization flow", () => {
   beforeEach(() => {
@@ -53,6 +54,35 @@ describe("Telegram phone authorization flow", () => {
     await waitFor(() => expect(fetch).toHaveBeenLastCalledWith("/api/telegram/send-code", expect.objectContaining({
       body: JSON.stringify({ phone: "+998917654321" }),
     })));
+  });
+
+  it("shows a frontend error and does not send an invalid phone number", () => {
+    render(<ConnectFlow initialState="idle" />);
+
+    fireEvent.change(screen.getByLabelText("Telefon raqami"), {
+      target: { value: "998-90-123" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Kod yuborish" }));
+
+    expect(screen.getByText(TELEGRAM_PHONE_ERROR_MESSAGE)).toBeInTheDocument();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("shows a backend validation error next to the phone input", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: false,
+      json: async () => ({
+        error: { code: "VALIDATION_ERROR", message: "Telegram bu telefon raqamini qabul qilmadi." },
+      }),
+    } as Response);
+    render(<ConnectFlow initialState="idle" />);
+
+    fireEvent.change(screen.getByLabelText("Telefon raqami"), {
+      target: { value: "+998901234567" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Kod yuborish" }));
+
+    expect(await screen.findByText("Telegram bu telefon raqamini qabul qilmadi.")).toBeInTheDocument();
   });
 
   it("can restart an authorization restored after a page refresh", async () => {
