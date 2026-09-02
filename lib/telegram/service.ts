@@ -160,6 +160,10 @@ export class TelegramService {
     }
   }
 
+  async cancelAuthorization(userId: string) {
+    await telegramRepository.deleteChallenge(userId);
+  }
+
   private async bumpChallenge(
     current: TelegramChallengeRecord,
     userId: string,

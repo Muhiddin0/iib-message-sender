@@ -115,6 +115,11 @@ describe("TelegramService authorization", () => {
     expect(mocks.saveChallenge).toHaveBeenCalledWith(expect.objectContaining({ attempts: 1 }));
   });
 
+  it("cancels an authorization challenge so the phone number can be changed", async () => {
+    await expect(telegramService.cancelAuthorization("user-a")).resolves.toBeUndefined();
+    expect(mocks.deleteChallenge).toHaveBeenCalledWith("user-a");
+  });
+
   it("reports a revoked stored session as authorization required", async () => {
     const telegram = client() as ReturnType<typeof client> & { iterDialogs: ReturnType<typeof vi.fn> };
     telegram.iterDialogs = vi.fn().mockReturnValue({

@@ -1,7 +1,7 @@
 "use client";
 
 import { Button, Input, LayerCard, SensitiveInput } from "@cloudflare/kumo";
-import { ArrowLeftIcon, CheckCircleIcon, PaperPlaneTiltIcon } from "@phosphor-icons/react";
+import { ArrowLeftIcon, CheckCircleIcon, PaperPlaneTiltIcon, PencilSimpleIcon } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
@@ -24,12 +24,12 @@ export function ConnectFlow({ initialState }: { initialState: State }) {
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"submit" | "edit" | null>(null);
   const [error, setError] = useState("");
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    setBusy(true);
+    setBusy("submit");
     setError("");
     try {
       const result =
@@ -46,7 +46,22 @@ export function ConnectFlow({ initialState }: { initialState: State }) {
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Amal bajarilmadi.");
     } finally {
-      setBusy(false);
+      setBusy(null);
+    }
+  }
+
+  async function editPhone() {
+    setBusy("edit");
+    setError("");
+    try {
+      await post("/api/telegram/cancel-authorization", {});
+      setCode("");
+      setPassword("");
+      setState("idle");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Amal bajarilmadi.");
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -84,7 +99,27 @@ export function ConnectFlow({ initialState }: { initialState: State }) {
             value={phone}
             onChange={(event) => setPhone(event.target.value.replace(/\s/g, ""))}
             required
+            autoFocus
           />
+        ) : null}
+        {state !== "idle" ? (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-kumo-hairline bg-kumo-tint px-3 py-2.5">
+            <div className="min-w-0">
+              <p className="text-xs text-kumo-subtle">Tasdiqlanayotgan telefon raqami</p>
+              {phone ? <p className="mt-0.5 truncate text-sm font-medium tabular-nums">{phone}</p> : null}
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              icon={PencilSimpleIcon}
+              loading={busy === "edit"}
+              disabled={busy !== null}
+              onClick={editPhone}
+            >
+              Raqamni o‘zgartirish
+            </Button>
+          </div>
         ) : null}
         {state === "code_required" ? (
           <Input
@@ -112,7 +147,7 @@ export function ConnectFlow({ initialState }: { initialState: State }) {
         ) : null}
         <div className="flex items-center justify-between gap-3 pt-1">
           <Button type="button" variant="ghost" icon={ArrowLeftIcon} onClick={() => router.push("/dashboard")}>Orqaga</Button>
-          <Button type="submit" variant="primary" loading={busy} disabled={busy}>
+          <Button type="submit" variant="primary" loading={busy === "submit"} disabled={busy !== null}>
             {state === "idle" ? "Kod yuborish" : state === "code_required" ? "Kodni tasdiqlash" : "Hisobni ulash"}
           </Button>
         </div>
@@ -120,4 +155,3 @@ export function ConnectFlow({ initialState }: { initialState: State }) {
     </LayerCard>
   );
 }
-
