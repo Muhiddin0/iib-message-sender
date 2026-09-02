@@ -92,10 +92,10 @@ Production’da ikkalasini HTTPS domen bilan almashtiring va `NEXTAUTH_URL=https
 
 Authorization oqimi:
 
-1. Telefon xalqaro formatda tekshiriladi.
-2. mtcute code hash va vaqtinchalik session oladi.
-3. Challenge serverda shifrlanib, 10 daqiqaga saqlanadi.
-4. Kod va zarur bo‘lsa 2FA paroli serverda tekshiriladi.
+1. Foydalanuvchi xalqaro formatdagi telefon raqami yoki Telegram QR kod usulini tanlaydi.
+2. Telefon usulida mtcute code hash va vaqtinchalik session oladi; QR usulida esa qisqa muddatli login URL authenticated stream orqali brauzerga uzatiladi.
+3. Telefon challenge’i yoki QR’dan keyingi 2FA challenge’i serverda shifrlanib, 10 daqiqaga saqlanadi.
+4. Kod, QR tasdig‘i va zarur bo‘lsa 2FA paroli serverda tekshiriladi.
 5. Yakuniy session alohida `telegram_sessions` record’iga shifrlangan holda yoziladi.
 6. Chat sync job avtomatik navbatga qo‘yiladi.
 

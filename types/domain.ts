@@ -6,6 +6,7 @@ export type TelegramConnectionStatus =
   | "temporarily_unavailable";
 
 export type TelegramAuthState = "idle" | "code_required" | "password_required" | "connected";
+export type TelegramAuthMethod = "phone" | "qr";
 export type TelegramChatType = "group" | "supergroup" | "channel";
 export type MessageKind = "text" | "photo" | "video";
 export type CampaignMode = "compose" | "forward";

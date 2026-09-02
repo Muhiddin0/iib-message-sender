@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   saveSession: vi.fn(),
   getSession: vi.fn(),
   getChallenge: vi.fn(),
+  getActiveChallenge: vi.fn(),
   saveChallenge: vi.fn(),
   deleteChallenge: vi.fn(),
   enqueueJob: vi.fn(),
@@ -25,18 +26,21 @@ vi.mock("@/lib/repositories/telegram-repository", () => ({
     saveSession: mocks.saveSession,
     getSession: mocks.getSession,
     getChallenge: mocks.getChallenge,
+    getActiveChallenge: mocks.getActiveChallenge,
     saveChallenge: mocks.saveChallenge,
     deleteChallenge: mocks.deleteChallenge,
     enqueueJob: mocks.enqueueJob,
   },
 }));
 
-import { encryptSecret } from "@/lib/security/encryption";
+import { decryptSecret, encryptSecret } from "@/lib/security/encryption";
 import { telegramService } from "@/lib/telegram/service";
 
 function client() {
   return {
     sendCode: vi.fn().mockResolvedValue({ phoneCodeHash: "hash", type: "app", length: 5 }),
+    resendCode: vi.fn().mockResolvedValue({ phoneCodeHash: "new-hash", type: "sms", length: 5, timeout: 30 }),
+    signInQr: vi.fn().mockResolvedValue({ id: 77, firstName: "Ali", lastName: null, username: "ali" }),
     exportSession: vi.fn().mockResolvedValue("raw-session-secret"),
     importSession: vi.fn().mockResolvedValue(undefined),
     signIn: vi.fn().mockResolvedValue({ id: 77, firstName: "Ali", lastName: null, username: "ali" }),
@@ -66,6 +70,7 @@ describe("TelegramService authorization", () => {
     mocks.createAccount.mockResolvedValue({ id: "account-a" });
     mocks.deleteAccount.mockResolvedValue(undefined);
     mocks.saveSession.mockResolvedValue(undefined);
+    mocks.getActiveChallenge.mockResolvedValue(null);
     mocks.deleteChallenge.mockResolvedValue(undefined);
     mocks.enqueueJob.mockResolvedValue({ id: "job" });
   });
@@ -113,6 +118,130 @@ describe("TelegramService authorization", () => {
 
     await expect(telegramService.verifyCode("user-a", "00000")).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
     expect(mocks.saveChallenge).toHaveBeenCalledWith(expect.objectContaining({ attempts: 1 }));
+  });
+
+  it("resends the code with the encrypted challenge and saves the new code hash", async () => {
+    const telegram = client();
+    mocks.createClient.mockReturnValue(telegram);
+    const payload = {
+      session: "raw-session-secret",
+      phone: "+998901234567",
+      phoneCodeHash: "old-hash",
+      resendAvailableAt: new Date(Date.now() - 1_000).toISOString(),
+    };
+    const encrypted = encryptSecret(JSON.stringify(payload), { purpose: "telegram-challenge", userId: "user-a" });
+    mocks.getChallenge.mockResolvedValue({
+      id: "challenge", state: "code_required", attempts: 2, expires_at: new Date(Date.now() + 60_000).toISOString(),
+      ciphertext: encrypted.ciphertext, iv: encrypted.iv, auth_tag: encrypted.authTag, key_version: encrypted.keyVersion,
+    });
+
+    await expect(telegramService.resendAuthorizationCode("user-a")).resolves.toMatchObject({
+      state: "code_required",
+      resendAfterSeconds: 30,
+    });
+    expect(telegram.resendCode).toHaveBeenCalledWith({
+      phone: "+998901234567",
+      phoneCodeHash: "old-hash",
+    });
+    expect(mocks.saveChallenge).toHaveBeenCalledWith(expect.objectContaining({
+      state: "code_required",
+      attempts: 0,
+    }));
+    const savedEnvelope = mocks.saveChallenge.mock.calls[0][0].envelope;
+    const savedPayload = JSON.parse(decryptSecret(savedEnvelope, {
+      purpose: "telegram-challenge",
+      userId: "user-a",
+    }));
+    expect(savedPayload).toMatchObject({
+      phone: "+998901234567",
+      phoneCodeHash: "new-hash",
+    });
+  });
+
+  it("enforces the Telegram resend delay on the backend", async () => {
+    const payload = {
+      session: "raw-session-secret",
+      phone: "+998901234567",
+      phoneCodeHash: "hash",
+      resendAvailableAt: new Date(Date.now() + 30_000).toISOString(),
+    };
+    const encrypted = encryptSecret(JSON.stringify(payload), { purpose: "telegram-challenge", userId: "user-a" });
+    mocks.getChallenge.mockResolvedValue({
+      id: "challenge", state: "code_required", attempts: 0, expires_at: new Date(Date.now() + 60_000).toISOString(),
+      ciphertext: encrypted.ciphertext, iv: encrypted.iv, auth_tag: encrypted.authTag, key_version: encrypted.keyVersion,
+    });
+
+    await expect(telegramService.resendAuthorizationCode("user-a")).rejects.toMatchObject({
+      code: "RATE_LIMITED",
+      status: 429,
+      retryAfterSeconds: expect.any(Number),
+    });
+    expect(mocks.createClient).not.toHaveBeenCalled();
+  });
+
+  it("completes QR authorization while keeping the Telegram session on the server", async () => {
+    const telegram = client();
+    telegram.signInQr.mockImplementation(async ({ onUrlUpdated, onQrScanned }) => {
+      onUrlUpdated("tg://login?token=secret-token", new Date(Date.now() + 30_000));
+      onQrScanned();
+      return { id: 77, firstName: "Ali", lastName: null, username: "ali" };
+    });
+    mocks.createClient.mockReturnValue(telegram);
+    const onUrlUpdated = vi.fn();
+    const onQrScanned = vi.fn();
+
+    await expect(telegramService.authorizeWithQr("user-a", {
+      signal: new AbortController().signal,
+      onUrlUpdated,
+      onQrScanned,
+    })).resolves.toEqual({ state: "connected", accountId: "account-a" });
+
+    expect(mocks.createClient).toHaveBeenCalledWith({ disableUpdates: false });
+    expect(onUrlUpdated).toHaveBeenCalledWith("tg://login?token=secret-token", expect.any(Date));
+    expect(onQrScanned).toHaveBeenCalledOnce();
+    expect(mocks.saveSession).toHaveBeenCalledOnce();
+    expect(JSON.stringify(mocks.saveSession.mock.calls[0])).not.toContain("raw-session-secret");
+  });
+
+  it("continues a QR login with the Telegram 2FA password when required", async () => {
+    const telegram = client();
+    telegram.signInQr.mockRejectedValue(new tl.RpcError(401, "SESSION_PASSWORD_NEEDED"));
+    mocks.createClient.mockReturnValue(telegram);
+    let savedChallenge: ReturnType<typeof challenge> | undefined;
+    mocks.saveChallenge.mockImplementation(async (input) => { savedChallenge = challenge(input); });
+
+    await expect(telegramService.authorizeWithQr("user-a", {
+      signal: new AbortController().signal,
+      onUrlUpdated: vi.fn(),
+      onQrScanned: vi.fn(),
+    })).resolves.toEqual({ state: "password_required" });
+
+    expect(savedChallenge).toBeDefined();
+    const savedPayload = JSON.parse(decryptSecret({
+      ciphertext: savedChallenge!.ciphertext,
+      iv: savedChallenge!.iv,
+      authTag: savedChallenge!.auth_tag,
+      keyVersion: savedChallenge!.key_version,
+    }, { purpose: "telegram-challenge", userId: "user-a" }));
+    expect(savedPayload).toEqual({ method: "qr", session: "raw-session-secret" });
+  });
+
+  it("restores the QR method for a pending 2FA challenge", async () => {
+    const encrypted = encryptSecret(JSON.stringify({ method: "qr", session: "secret" }), {
+      purpose: "telegram-challenge",
+      userId: "user-a",
+    });
+    mocks.getActiveChallenge.mockResolvedValue({
+      id: "challenge", state: "password_required", attempts: 0,
+      expires_at: new Date(Date.now() + 60_000).toISOString(),
+      ciphertext: encrypted.ciphertext, iv: encrypted.iv,
+      auth_tag: encrypted.authTag, key_version: encrypted.keyVersion,
+    });
+
+    await expect(telegramService.getActiveAuthorization("user-a")).resolves.toEqual({
+      state: "password_required",
+      method: "qr",
+    });
   });
 
   it("cancels an authorization challenge so the phone number can be changed", async () => {

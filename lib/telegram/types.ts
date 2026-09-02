@@ -1,10 +1,21 @@
 import type { TelegramChatType } from "@/types/domain";
 
-export interface TelegramAuthChallengePayload {
+export interface TelegramPhoneAuthChallengePayload {
+  method?: "phone";
   session: string;
   phone: string;
   phoneCodeHash: string;
+  resendAvailableAt?: string;
 }
+
+export interface TelegramQrAuthChallengePayload {
+  method: "qr";
+  session: string;
+}
+
+export type TelegramAuthChallengePayload =
+  | TelegramPhoneAuthChallengePayload
+  | TelegramQrAuthChallengePayload;
 
 export interface TelegramIdentity {
   id: string;
@@ -29,4 +40,3 @@ export interface TelegramMessageMetrics {
   reactions: number | null;
   replies: number | null;
 }
-

@@ -14,12 +14,17 @@ import type {
   TelegramAuthChallengePayload,
   TelegramIdentity,
   TelegramMessageMetrics,
+  TelegramPhoneAuthChallengePayload,
   TelegramRemoteChat,
 } from "@/lib/telegram/types";
-import type { MessageKind } from "@/types/domain";
+import type { MessageKind, TelegramAuthMethod, TelegramAuthState } from "@/types/domain";
 
 const AUTH_TTL_MS = 10 * 60_000;
 const MAX_AUTH_ATTEMPTS = 5;
+
+function resendDelaySeconds(timeout: number | undefined) {
+  return Number.isFinite(timeout) ? Math.max(0, Math.ceil(timeout ?? 0)) : 0;
+}
 
 function envelope(record: TelegramSessionRecord | TelegramChallengeRecord) {
   return {
@@ -36,6 +41,12 @@ function challengePayload(record: TelegramChallengeRecord, userId: string) {
   }
   const raw = decryptSecret(envelope(record), { purpose: "telegram-challenge", userId });
   return JSON.parse(raw) as TelegramAuthChallengePayload;
+}
+
+function phoneChallengePayload(
+  payload: TelegramAuthChallengePayload,
+): payload is TelegramPhoneAuthChallengePayload {
+  return payload.method !== "qr";
 }
 
 function identity(user: {
@@ -88,10 +99,13 @@ export class TelegramService {
       if (!("phoneCodeHash" in result)) {
         throw new AppError("CONFLICT", "Telegram sessiyasi allaqachon faol.", 409);
       }
+      const resendAfterSeconds = resendDelaySeconds(result.timeout);
       const payload: TelegramAuthChallengePayload = {
+        method: "phone",
         session: await client.exportSession(),
         phone,
         phoneCodeHash: result.phoneCodeHash,
+        resendAvailableAt: new Date(Date.now() + resendAfterSeconds * 1_000).toISOString(),
       };
       await telegramRepository.saveChallenge({
         userId,
@@ -99,7 +113,12 @@ export class TelegramService {
         envelope: encryptSecret(JSON.stringify(payload), { purpose: "telegram-challenge", userId }),
         expiresAt: new Date(Date.now() + AUTH_TTL_MS).toISOString(),
       });
-      return { state: "code_required" as const, deliveryType: result.type, codeLength: result.length };
+      return {
+        state: "code_required" as const,
+        deliveryType: result.type,
+        codeLength: result.length,
+        resendAfterSeconds,
+      };
     } catch (error) {
       throw telegramError(error);
     } finally {
@@ -113,6 +132,9 @@ export class TelegramService {
       throw new AppError("VALIDATION_ERROR", "Avval tasdiqlash kodini so‘rang.", 400);
     }
     const payload = challengePayload(challenge, userId);
+    if (!phoneChallengePayload(payload)) {
+      throw new AppError("VALIDATION_ERROR", "Telefon orqali tasdiqlash jarayoni topilmadi.", 400);
+    }
     const client = createTelegramClient();
     try {
       await client.importSession(payload.session);
@@ -141,6 +163,59 @@ export class TelegramService {
     }
   }
 
+  async resendAuthorizationCode(userId: string) {
+    const challenge = await telegramRepository.getChallenge(userId);
+    if (!challenge || challenge.state !== "code_required") {
+      throw new AppError("VALIDATION_ERROR", "Avval telefon raqamingizga kod yuboring.", 400);
+    }
+    const payload = challengePayload(challenge, userId);
+    if (!phoneChallengePayload(payload)) {
+      throw new AppError("VALIDATION_ERROR", "Telefon orqali tasdiqlash jarayoni topilmadi.", 400);
+    }
+    const resendAt = new Date(payload.resendAvailableAt ?? 0).getTime();
+    const retryAfterSeconds = Math.ceil((resendAt - Date.now()) / 1_000);
+    if (retryAfterSeconds > 0) {
+      throw new AppError(
+        "RATE_LIMITED",
+        `Yangi kodni ${retryAfterSeconds} soniyadan keyin so‘rashingiz mumkin.`,
+        429,
+        retryAfterSeconds,
+      );
+    }
+
+    const client = createTelegramClient();
+    try {
+      await client.importSession(payload.session);
+      const result = await client.resendCode({
+        phone: payload.phone,
+        phoneCodeHash: payload.phoneCodeHash,
+      });
+      const resendAfterSeconds = resendDelaySeconds(result.timeout);
+      await telegramRepository.saveChallenge({
+        userId,
+        state: "code_required",
+        envelope: encryptSecret(JSON.stringify({
+          ...payload,
+          session: await client.exportSession(),
+          phoneCodeHash: result.phoneCodeHash,
+          resendAvailableAt: new Date(Date.now() + resendAfterSeconds * 1_000).toISOString(),
+        }), { purpose: "telegram-challenge", userId }),
+        attempts: 0,
+        expiresAt: new Date(Date.now() + AUTH_TTL_MS).toISOString(),
+      });
+      return {
+        state: "code_required" as const,
+        deliveryType: result.type,
+        codeLength: result.length,
+        resendAfterSeconds,
+      };
+    } catch (error) {
+      throw telegramError(error);
+    } finally {
+      await client.destroy().catch(() => undefined);
+    }
+  }
+
   async verifyPassword(userId: string, password: string) {
     const challenge = await telegramRepository.getChallenge(userId);
     if (!challenge || challenge.state !== "password_required") {
@@ -154,6 +229,64 @@ export class TelegramService {
       return await this.finishAuthorization(userId, client, identity(user));
     } catch (error) {
       await this.bumpChallenge(challenge, userId, payload, "password_required");
+      throw telegramError(error);
+    } finally {
+      await client.destroy().catch(() => undefined);
+    }
+  }
+
+  async getActiveAuthorization(userId: string): Promise<{
+    state: TelegramAuthState;
+    method: TelegramAuthMethod;
+  }> {
+    const challenge = await telegramRepository.getActiveChallenge(userId);
+    if (!challenge || challenge.attempts >= MAX_AUTH_ATTEMPTS) {
+      return { state: "idle", method: "phone" };
+    }
+    const payload = challengePayload(challenge, userId);
+    return {
+      state: challenge.state,
+      method: payload.method === "qr" ? "qr" : "phone",
+    };
+  }
+
+  async authorizeWithQr(
+    userId: string,
+    input: {
+      signal: AbortSignal;
+      onUrlUpdated: (url: string, expiresAt: Date) => void;
+      onQrScanned: () => void;
+    },
+  ) {
+    input.signal.throwIfAborted();
+    if (await telegramRepository.getAccount(userId)) {
+      throw new AppError("CONFLICT", "Bu profilga Telegram hisobi allaqachon ulangan.", 409);
+    }
+    input.signal.throwIfAborted();
+    await telegramRepository.deleteChallenge(userId);
+    input.signal.throwIfAborted();
+    const client = createTelegramClient({ disableUpdates: false });
+    try {
+      const user = await client.signInQr({
+        abortSignal: input.signal,
+        onUrlUpdated: input.onUrlUpdated,
+        onQrScanned: input.onQrScanned,
+      });
+      return await this.finishAuthorization(userId, client, identity(user));
+    } catch (error) {
+      if (input.signal.aborted) throw error;
+      if (isPasswordRequired(error)) {
+        await telegramRepository.saveChallenge({
+          userId,
+          state: "password_required",
+          envelope: encryptSecret(JSON.stringify({
+            method: "qr",
+            session: await client.exportSession(),
+          } satisfies TelegramAuthChallengePayload), { purpose: "telegram-challenge", userId }),
+          expiresAt: new Date(Date.now() + AUTH_TTL_MS).toISOString(),
+        });
+        return { state: "password_required" as const };
+      }
       throw telegramError(error);
     } finally {
       await client.destroy().catch(() => undefined);

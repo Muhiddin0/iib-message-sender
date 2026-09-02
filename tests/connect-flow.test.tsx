@@ -4,8 +4,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const navigation = vi.hoisted(() => ({ push: vi.fn(), refresh: vi.fn() }));
+const qrMocks = vi.hoisted(() => ({ toDataURL: vi.fn() }));
 
 vi.mock("next/navigation", () => ({ useRouter: () => navigation }));
+vi.mock("qrcode", () => ({ default: { toDataURL: qrMocks.toDataURL } }));
 
 import { ConnectFlow } from "@/components/telegram/connect-flow";
 import { TELEGRAM_PHONE_ERROR_MESSAGE } from "@/lib/telegram/phone";
@@ -13,10 +15,12 @@ import { TELEGRAM_PHONE_ERROR_MESSAGE } from "@/lib/telegram/phone";
 describe("Telegram phone authorization flow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    qrMocks.toDataURL.mockResolvedValue("data:image/png;base64,cXI=");
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async (path: string) => ({
       ok: true,
       json: async () => ({
         state: path === "/api/telegram/cancel-authorization" ? "idle" : "code_required",
+        resendAfterSeconds: 0,
       }),
     })));
   });
@@ -66,6 +70,58 @@ describe("Telegram phone authorization flow", () => {
 
     expect(screen.getByText(TELEGRAM_PHONE_ERROR_MESSAGE)).toBeInTheDocument();
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("offers QR login and renders the streamed Telegram QR URL", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(
+      `${JSON.stringify({
+        state: "qr_pending",
+        url: "tg://login?token=secret-token",
+        expiresAt: new Date(Date.now() + 30_000).toISOString(),
+      })}\n`,
+      { headers: { "Content-Type": "application/x-ndjson" } },
+    ));
+    render(<ConnectFlow initialState="idle" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "QR kod orqali" }));
+
+    expect(await screen.findByAltText("Telegram orqali kirish QR kodi")).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith("/api/telegram/qr-login", expect.objectContaining({
+      method: "POST",
+      signal: expect.any(AbortSignal),
+    }));
+    expect(qrMocks.toDataURL).toHaveBeenCalledWith(
+      "tg://login?token=secret-token",
+      expect.objectContaining({ width: 232 }),
+    );
+  });
+
+  it("asks for 2FA after the QR code is approved", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(
+      `${JSON.stringify({ state: "qr_scanned" })}\n${JSON.stringify({ state: "password_required" })}\n`,
+      { headers: { "Content-Type": "application/x-ndjson" } },
+    ));
+    render(<ConnectFlow initialState="idle" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "QR kod orqali" }));
+
+    expect(await screen.findByLabelText("Ikki bosqichli himoya paroli")).toBeInTheDocument();
+    expect(screen.getByText("QR kod Telegram’da tasdiqlandi.")).toBeInTheDocument();
+    expect(screen.queryByText("Tasdiqlanayotgan telefon raqami")).not.toBeInTheDocument();
+  });
+
+  it("resends the verification code and clears the old code", async () => {
+    render(<ConnectFlow initialState="code_required" />);
+    fireEvent.change(screen.getByLabelText("Tasdiqlash kodi"), { target: { value: "12345" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Kodni qayta yuborish" }));
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      "/api/telegram/resend-code",
+      expect.objectContaining({ method: "POST" }),
+    ));
+    expect(screen.getByLabelText("Tasdiqlash kodi")).toHaveValue("");
+    expect(screen.getByRole("status")).toHaveTextContent("Yangi tasdiqlash kodi yuborildi.");
   });
 
   it("shows a backend validation error next to the phone input", async () => {
